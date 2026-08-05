@@ -1,4 +1,4 @@
-# DuckDuckGo_BoardGame
+# DuckClub_BoardGame
 Board and card game project currently in documentation stage, with plans for future playable development. The project focuses on defining the rules, card interactions, board structure, core mechanics and gameplay loop before moving into implementation.
 
 Repository: [DuckDuckGo_BoardGame](https://github.com/CuackCuackClub/DuckDuckGo_BoardGame)
