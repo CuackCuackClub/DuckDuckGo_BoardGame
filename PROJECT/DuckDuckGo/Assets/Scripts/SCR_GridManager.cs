@@ -1,6 +1,7 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem; // Required for the New Input System
+using UnityEngine.InputSystem;
 
 public class SCR_GridManager : MonoBehaviour
 {
@@ -8,18 +9,32 @@ public class SCR_GridManager : MonoBehaviour
     public int gridWidth = 8;
     public int gridHeight = 8;
     public float tileSize = 1.1f;
+    public GameObject tileObject;
+    public Vector3 unitOffset = new Vector3(0, 0.5f, 0); // Ajuste vertical para prefabs
 
-    [Header("Movement Rules")]
-    public int maxMovementDistance = 3;
+    [System.Serializable]
+    public struct EntitySpawnData
+    {
+        public string entityName;
+        public GameObject prefab;
+        public Vector2Int spawnPosition;
+        public EntitiesData entityType;
+        public int hp;
+        public int attack;
+        public int defense;
+        public int moveDistance;
+    }
 
-    private Transform selectedPlayer = null;
-    private Vector2Int selectedPlayerGridPos;
+    [Header("Entities to Spawn")]
+    public List<EntitySpawnData> initialEntities = new List<EntitySpawnData>();
+
+    private EntityData selectedEntity = null;
     private GameObject[,] gridTiles;
 
     void Start()
     {
         GenerateGrid();
-        SpawnPlayers();
+        SpawnInitialEntities();
     }
 
     void Update()
@@ -35,11 +50,8 @@ public class SCR_GridManager : MonoBehaviour
         {
             for (int j = 0; j < gridHeight; j++)
             {
-                GameObject tile = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                GameObject tile = Instantiate(tileObject, new Vector3(i * tileSize, 0, j * tileSize), Quaternion.identity, this.transform);
                 tile.name = $"Tile_{i}_{j}";
-                tile.transform.position = new Vector3(i * tileSize, 0, j * tileSize);
-                tile.transform.localScale = new Vector3(1f, 0.1f, 1f);
-                tile.transform.parent = this.transform;
 
                 TileData data = tile.AddComponent<TileData>();
                 data.gridPosition = new Vector2Int(i, j);
@@ -49,26 +61,50 @@ public class SCR_GridManager : MonoBehaviour
         }
     }
 
-    void SpawnPlayers()
+    void SpawnInitialEntities()
     {
-        SpawnPlayer("Player 1", new Vector2Int(0, 0), Color.red);
-        SpawnPlayer("Player 2", new Vector2Int(7, 7), Color.blue);
+        HashSet<Vector2Int> occupiedPositions = new HashSet<Vector2Int>();
+        foreach (var entityInfo in initialEntities)
+        {
+            if (entityInfo.prefab != null)
+            {
+                SpawnEntity(entityInfo);
+                occupiedPositions.Add(entityInfo.spawnPosition);
+            }
+            else
+            {
+                Debug.LogWarning($"[GridManager]: El prefab para {entityInfo.entityName} no está asignado en el Inspector.");
+            }
+        }
     }
 
-    void SpawnPlayer(string name, Vector2Int gridPos, Color color)
+    public EntityData SpawnEntity(EntitySpawnData spawnData)
     {
-        GameObject player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        player.name = name;
-        player.tag = "Player";
-        player.transform.localScale = new Vector3(0.6f, 0.6f, 0.6f);
+        if (IsTileOccupied(spawnData.spawnPosition))
+        {
+            Debug.LogWarning($"[Spawn Warning]: Intentando spawnear en casilla ocupada {spawnData.spawnPosition}.");
+        }
 
-        player.transform.position = GetWorldPosition(gridPos) + new Vector3(0, 0.4f, 0);
+        Vector3 spawnWorldPos = GetWorldPosition(spawnData.spawnPosition) + unitOffset;
+        GameObject unitObj = Instantiate(spawnData.prefab, spawnWorldPos, Quaternion.identity);
+        unitObj.name = spawnData.entityName;
 
-        Renderer renderer = player.GetComponent<Renderer>();
-        renderer.material.color = color;
+        EntityData data = unitObj.GetComponent<EntityData>();
+        if (data == null)
+        {
+            data = unitObj.AddComponent<EntityData>();
+        }
 
-        PlayerData data = player.AddComponent<PlayerData>();
-        data.gridPosition = gridPos;
+        data.entityName = spawnData.entityName;
+        data.gridPosition = spawnData.spawnPosition;
+        data.maxHealth = spawnData.hp;
+        data.currentHealth = spawnData.hp;
+        data.attackPower = spawnData.attack;
+        data.defensePower = spawnData.defense;
+        data.moveDistance = spawnData.moveDistance;
+        data.SetEntityType(spawnData.entityType);
+
+        return data;
     }
 
     void HandleInput()
@@ -80,48 +116,81 @@ public class SCR_GridManager : MonoBehaviour
 
             if (Physics.Raycast(ray, out RaycastHit hit))
             {
-                PlayerData clickedPlayer = hit.collider.GetComponent<PlayerData>();
-                if (clickedPlayer != null)
+                EntityData clickedEntity = hit.collider.GetComponentInParent<EntityData>();
+                if (clickedEntity != null)
                 {
-                    SelectPlayer(clickedPlayer);
+                    if (clickedEntity.entities == EntitiesData.Player)
+                    {
+                        SelectEntity(clickedEntity);
+                    }
                     return;
                 }
 
                 TileData clickedTile = hit.collider.GetComponent<TileData>();
-                if (clickedTile != null && selectedPlayer != null)
+                if (clickedTile != null && selectedEntity != null)
                 {
-                    TryMovePlayer(clickedTile.gridPosition);
+                    TryMoveEntity(clickedTile.gridPosition);
                 }
+            }
+            else
+            {
+                DeselectEntity();
             }
         }
     }
 
-    void SelectPlayer(PlayerData player)
+    void SelectEntity(EntityData entity)
     {
-        selectedPlayer = player.transform;
-        selectedPlayerGridPos = player.gridPosition;
-        Debug.Log($"[Selected]: {player.gameObject.name} at Grid {selectedPlayerGridPos}");
+        selectedEntity = entity;
+        Debug.Log($"[Selected]: {entity.entityName} en {entity.gridPosition} (Límite de movimiento: {entity.moveDistance})");
     }
 
-    void TryMovePlayer(Vector2Int targetGridPos)
+    void DeselectEntity()
     {
-        int distance = CalculateManhattanDistance(selectedPlayerGridPos, targetGridPos);
-
-        if (distance <= maxMovementDistance && distance > 0)
+        if (selectedEntity != null)
         {
-            PlayerData data = selectedPlayer.GetComponent<PlayerData>();
-            data.gridPosition = targetGridPos;
-            selectedPlayerGridPos = targetGridPos;
+            Debug.Log($"[Deselected]: {selectedEntity.entityName}");
+            selectedEntity = null;
+        }
+    }
 
-            selectedPlayer.position = GetWorldPosition(targetGridPos) + new Vector3(0, 0.4f, 0);
-            Debug.Log($"[Moved]: {selectedPlayer.name} to {targetGridPos} (Distance: {distance})");
+    void TryMoveEntity(Vector2Int targetGridPos)
+    {
+        // Verificar si la casilla destino ya tiene otra unidad
+        if (IsTileOccupied(targetGridPos))
+        {
+            Debug.LogWarning($"[Invalid Move]: La casilla {targetGridPos} está ocupada.");
+            return;
+        }
 
-            selectedPlayer = null;
+        int distance = CalculateManhattanDistance(selectedEntity.gridPosition, targetGridPos);
+
+        if (distance <= selectedEntity.moveDistance && distance > 0)
+        {
+            selectedEntity.gridPosition = targetGridPos;
+            selectedEntity.transform.position = GetWorldPosition(targetGridPos) + unitOffset;
+
+            Debug.Log($"[Moved]: {selectedEntity.entityName} a {targetGridPos} (Distancia: {distance})");
+
+            DeselectEntity();
         }
         else
         {
-            Debug.LogWarning($"[Invalid Move]: Distance {distance} exceeds max limit of {maxMovementDistance} tiles.");
+            Debug.LogWarning($"[Invalid Move]: La distancia {distance} excede el límite de {selectedEntity.moveDistance} de {selectedEntity.entityName}.");
         }
+    }
+
+    public bool IsTileOccupied(Vector2Int gridPos)
+    {
+        EntityData[] allEntities = FindObjectsByType<EntityData>(FindObjectsSortMode.None);
+        foreach (var entity in allEntities)
+        {
+            if (entity.gridPosition == gridPos)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Vector3 GetWorldPosition(Vector2Int gridPos)
@@ -133,15 +202,4 @@ public class SCR_GridManager : MonoBehaviour
     {
         return Math.Abs(start.x - end.x) + Math.Abs(start.y - end.y);
     }
-} 
-
-
-public class TileData : MonoBehaviour
-{
-    public Vector2Int gridPosition;
-}
-
-public class PlayerData : MonoBehaviour
-{
-    public Vector2Int gridPosition;
 }
